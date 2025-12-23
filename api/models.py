@@ -164,6 +164,11 @@ class Result(models.Model):
         on_delete=models.CASCADE, 
         related_name='results'
     )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name='results'
+    )
     correct = models.BooleanField()
     timestamp = models.DateTimeField(auto_now_add=True)
     
@@ -172,7 +177,7 @@ class Result(models.Model):
         verbose_name_plural = 'Results'
         ordering = ['-timestamp']
         indexes = [
-            models.Index(fields=['student', 'timestamp']),
+            models.Index(fields=['student', 'category', 'timestamp']),
         ]
     
     def __str__(self):

@@ -100,10 +100,16 @@ class StudentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsTeacher]
     
     def get_queryset(self):
-        """Return only students from classes belonging to current teacher."""
-        return Student.objects.filter(
+        queryset = Student.objects.filter(
             class_room__teacher=self.request.user
         ).select_related('class_room')
+
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(class_room__category_id=category)
+
+        return queryset
+
     
     def get_serializer_context(self):
         """Pass request context to serializer for validation."""
@@ -272,7 +278,7 @@ def submit_test_answer(request, student_id):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
-def get_student_results(request, student_id):
+def get_student_results(request, student_id, category_id=None):
     """
     Get complete results summary for a student.
     Returns all test attempts with statistics.
@@ -283,11 +289,11 @@ def get_student_results(request, student_id):
     student = get_object_or_404(
         Student, 
         id=student_id, 
-        class_room__teacher=request.user
+        class_room__teacher=request.user,
     )
     
     # Get all results for student
-    results = Result.objects.filter(student=student).select_related('vocab')
+    results = Result.objects.filter(student=student, cate).select_related('vocab')
     
     # Build summary data
     summary_data = {
