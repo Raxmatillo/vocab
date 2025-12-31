@@ -1,7 +1,56 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.core.validators import FileExtensionValidator
+from django.core.files.base import ContentFile
+from imagekit.models import ProcessedImageField
+from imagekit.processors import ResizeToFit
+from PIL import Image
+import io
 
+# import FileSizeValidator from a suitable package or define it
+
+
+from imagekit.models import ProcessedImageField
+from imagekit.processors import ResizeToFit, Adjust
+
+from django.core.exceptions import ValidationError
+from django.utils.deconstruct import deconstructible
+
+
+class FileSizeValidatorOrResize:
+    def __init__(self, limit_mb=2):
+        self.limit_mb = limit_mb
+
+    def __call__(self, image_field):
+        # Fayl hajmi MB
+        size_mb = image_field.size / (1024 * 1024)
+        if size_mb <= self.limit_mb:
+            return  # Hajmi mos, o'zgartirish shart emas
+
+        # Hajmi katta bo'lsa, rasmni kichraytirish
+        img = Image.open(image_field)
+        img_format = img.format
+
+        # Maksimal o'lchamni hisoblash: masalan, 800x800
+        img.thumbnail((800, 800), Image.ANTIALIAS)
+
+        # Yangi faylga saqlash
+        temp_io = io.BytesIO()
+        img.save(temp_io, format=img_format, quality=85)
+        temp_content = ContentFile(temp_io.getvalue(), name=image_field.name)
+
+        # Rasm maydonini yangilash
+        image_field.file = temp_content
+        image_field.size = temp_content.size
+
+
+@deconstructible
+class FileSizeValidator:
+    def __init__(self, limit_mb):
+        self.limit_mb = limit_mb
+
+    def __call__(self, value):
+        if value.size > self.limit_mb * 1024 * 1024:
+            raise ValidationError(f"Rasm hajmi {self.limit_mb} MB dan oshmasligi kerak.")
 
 class User(AbstractUser):
     """
@@ -19,7 +68,7 @@ class User(AbstractUser):
         return f"{self.full_name} ({self.username})"
 
 
-class Class(models.Model):
+class ClassRoom(models.Model):
     """
     Represents a classroom managed by a teacher.
     Each class contains 20-30 students.
@@ -33,7 +82,7 @@ class Class(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
-        verbose_name = 'Class'
+        verbose_name = 'ClassRoom'
         verbose_name_plural = 'Classes'
         ordering = ['-created_at']
     
@@ -53,7 +102,7 @@ class Student(models.Model):
     """
     full_name = models.CharField(max_length=255)
     class_room = models.ForeignKey(
-        Class, 
+        ClassRoom, 
         on_delete=models.CASCADE, 
         related_name='students'
     )
@@ -110,37 +159,62 @@ class Category(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return self.name
+        return f"{self.name} / {self.teacher.full_name}"
 
 
-class Vocabulary(models.Model):
-    """
-    Vocabulary word with category and image.
-    Now category is a ForeignKey to Category.
-    """
+class Vocabulary(models.Model):    
+    # Kategoriya o'qituvchiga tegishli ekanini filtrlaymiz (Admin panel uchun foydali)
     category = models.ForeignKey(
         Category,
         on_delete=models.CASCADE,
         related_name='vocabularies'
     )
-    word = models.CharField(max_length=255)
-    image = models.ImageField(
+    
+    word = models.CharField(max_length=255, verbose_name="So'z")
+    
+    image = ProcessedImageField(
         upload_to='vocabularies/%Y/%m/%d/',
-        validators=[FileExtensionValidator(['jpg', 'jpeg', 'png', 'gif', 'webp'])]
+        processors=[ResizeToFit(800, 800)],
+        format='JPEG',
+        options={'quality': 85},
+        blank=True,
+        null=True
     )
+
+    
     teacher = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        related_name='vocabularies'
     )
+    
     created_at = models.DateTimeField(auto_now_add=True)
+    MAX_IMAGE_MB = 2
+
+    def save(self, *args, **kwargs):
+        if self.image and self.image.size > self.MAX_IMAGE_MB * 1024 * 1024:
+            img = Image.open(self.image)
+            img_format = img.format or 'JPEG'
+
+            # Thumbnail bilan rasmni kichraytirish
+            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+
+            temp_io = io.BytesIO()
+            img.save(temp_io, format=img_format, quality=85)
+            temp_content = ContentFile(temp_io.getvalue(), name=self.image.name)
+
+            # Rasmni yangilash
+            self.image.save(self.image.name, temp_content, save=False)
+
+        super().save(*args, **kwargs)
+
 
     class Meta:
-        verbose_name = 'Vocabulary'
-        verbose_name_plural = 'Vocabularies'
+        verbose_name = 'Lug\'at'
+        verbose_name_plural = 'Lug\'atlar'
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['teacher']),
+            models.Index(fields=['word']), # Qidiruvni tezlashtirish uchun
         ]
 
     def __str__(self):
@@ -148,34 +222,42 @@ class Vocabulary(models.Model):
 
 
 
-class Result(models.Model):
-    """
-    Stores student test results.
-    Tracks whether a student answered correctly for each vocabulary item.
-    """
+class TestSession(models.Model):
     student = models.ForeignKey(
-        Student, 
-        on_delete=models.CASCADE, 
-        related_name='results',
-        db_index=True
+        Student,
+        on_delete=models.CASCADE,
+        related_name='test_sessions'
     )
-    vocab = models.ForeignKey(
-        Vocabulary, 
-        on_delete=models.CASCADE, 
-        related_name='results'
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE
     )
-    correct = models.BooleanField()
-    timestamp = models.DateTimeField(auto_now_add=True)
+    total_questions = models.IntegerField(default=0)
+    correct_answers = models.IntegerField(default=0)
+    finished_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def percentage(self):
+        if self.total_questions == 0: return 0
+        return round((self.correct_answers / self.total_questions) * 100, 2)
     
+    def __str__(self):
+        return f"{self.student} - {self.category}"
+
+
+class Result(models.Model):
+    session = models.ForeignKey(TestSession, on_delete=models.CASCADE, related_name='details')
+    vocabulary = models.ForeignKey(Vocabulary, on_delete=models.CASCADE)
+    is_correct = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
         verbose_name = 'Result'
         verbose_name_plural = 'Results'
-        ordering = ['-timestamp']
-        indexes = [
-            models.Index(fields=['student', 'timestamp']),
-        ]
+        ordering = ['-created_at']
     
-    def __str__(self):
-        status = "✓" if self.correct else "✗"
-        return f"{self.student.full_name} - {self.vocab.word} {status}"
+    # def __str__(self):
+    #     status = "✓" if self.correct else "✗"
+    #     return f"{self.session.student.full_name} - {self.vocabulary.word} {status}"
 

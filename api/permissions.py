@@ -21,6 +21,5 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
         # Write permissions only to owner
         if hasattr(obj, 'teacher'):
             return obj.teacher == request.user
-        
         return False
 
