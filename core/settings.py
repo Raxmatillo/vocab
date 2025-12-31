@@ -158,6 +158,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://vocabuz.netlify.app",
 ]
+CSRF_TRUSTED_ORIGINS = [
+    "https://vocab.fly.dev",
+    "https://vocabuz.netlify.app",
+]
 
 CORS_ALLOW_CREDENTIALS = True
 
