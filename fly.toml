@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for vocab on 2025-12-31T12:46:14Z
+# fly.toml app configuration file generated for vocab-cool-water-8804 on 2025-12-31T19:53:30+05:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'vocab'
+app = 'vocab-cool-water-8804'
 primary_region = 'iad'
 console_command = '/code/manage.py shell'
 
@@ -25,7 +25,6 @@ console_command = '/code/manage.py shell'
 
 [[vm]]
   memory = '1gb'
-  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 1024
 
